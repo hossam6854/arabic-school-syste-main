@@ -1,6 +1,6 @@
 "use client"
 
-import { useState, useEffect } from "react"
+import { useState, useEffect, Suspense } from "react"
 import { useRouter, useSearchParams } from "next/navigation"
 import Link from "next/link"
 import { Button } from "@/components/ui/button"
@@ -13,118 +13,103 @@ import { Alert, AlertDescription } from "@/components/ui/alert"
 import { createClient } from "@/lib/supabase/client"
 import { ResetAuthButton } from "@/components/reset-auth-button"
 
-export default function LoginPage() {
-  const router = useRouter()
+function LoginSuccessAlert({ setSuccessMessage }: { setSuccessMessage: (msg: string) => void }) {
   const searchParams = useSearchParams()
-  const [loading, setLoading] = useState(false)
-  const [error, setError] = useState("")
-  const [successMessage, setSuccessMessage] = useState("")
-  const [redirectPath, setRedirectPath] = useState<string | null>(null)
-  const [formData, setFormData] = useState({
-    email: "",
-    password: ""
-  })
-  
-  const supabase = createClient()
 
-  // Check if user was redirected from registration
   useEffect(() => {
     const registered = searchParams.get('registered')
     if (registered === 'true') {
       setSuccessMessage("تم إنشاء الحساب بنجاح. جميع الحسابات الجديدة تحتاج إلى موافقة الإدارة قبل أن تتمكن من تسجيل الدخول. سيتم إبلاغك عندما يتم تأكيد حسابك.")
     }
-  }, [searchParams])
+  }, [searchParams, setSuccessMessage])
 
-  // Handle form input changes
+  return null
+}
+
+export default function LoginPage() {
+  const router = useRouter()
+  const [loading, setLoading] = useState(false)
+  const [error, setError] = useState("")
+  const [successMessage, setSuccessMessage] = useState("")
+  const [formData, setFormData] = useState({
+    email: "",
+    password: ""
+  })
+
+  const supabase = createClient()
+
   const handleChange = (e: React.ChangeEvent<HTMLInputElement>) => {
     const { name, value } = e.target
     setFormData((prev) => ({ ...prev, [name]: value }))
   }
 
-  // Process the login entirely client-side
   const handleClientLogin = async (e: React.FormEvent) => {
     e.preventDefault()
-    
+
     try {
       setLoading(true)
       setError("")
       setSuccessMessage("")
-      
-      // Check for empty fields
+
       if (!formData.email || !formData.password) {
         setError("الرجاء إدخال البريد الإلكتروني وكلمة المرور")
         return
       }
-      
-      // Sign in with Supabase client
+
       const { error: signInError } = await supabase.auth.signInWithPassword({
         email: formData.email,
         password: formData.password
       })
-      
+
       if (signInError) {
-        console.error("Login error:", signInError)
-        setError(signInError.message || "فشل تسجيل الدخول. الرجاء التحقق من بيانات الاعتماد الخاصة بك")
+        setError(signInError.message || "فشل تسجيل الدخول. الرجاء التحقق من البيانات")
         return
       }
-      
-      // Get user role to redirect to proper dashboard
+
       const { data: { session } } = await supabase.auth.getSession()
-      
       if (!session) {
         setError("فشل إنشاء جلسة. يرجى المحاولة مرة أخرى")
         return
       }
-      
+
       const { data: userData, error: userError } = await supabase
         .from("users")
         .select("role_id, is_confirmed")
         .eq("id", session.user.id)
         .single()
-      
+
       if (userError || !userData) {
-        console.error("Error fetching user data:", userError)
         setError("حدث خطأ في جلب بيانات المستخدم. يرجى المحاولة مرة أخرى")
         return
       }
 
-      // Check if the account is confirmed
       if (!userData.is_confirmed) {
         await supabase.auth.signOut()
         setError("حسابك بحاجة إلى موافقة الإدارة قبل تسجيل الدخول")
         return
       }
-      
-      // Determine redirect path based on role
+
       const dashboardPaths = {
         1: "/student",
         2: "/parent",
         3: "/teacher",
         4: "/admin",
       }
-      
+
       const redirectTo = dashboardPaths[userData.role_id as keyof typeof dashboardPaths] || "/"
-      
-      // Show success toast and redirect
+
       toast({
         title: "تم تسجيل الدخول بنجاح",
         description: "جاري تحويلك إلى لوحة التحكم...",
       })
-      
-      // Redirect to dashboard
+
       router.push(redirectTo)
-      
+
     } catch (error: any) {
-      console.error("Login error:", error)
       setError(error.message || "حدث خطأ أثناء تسجيل الدخول")
     } finally {
       setLoading(false)
     }
-  }
-
-  // Handle login form submission
-  const handleSubmit = async (e: React.FormEvent) => {
-    await handleClientLogin(e)
   }
 
   return (
@@ -137,6 +122,12 @@ export default function LoginPage() {
           </CardDescription>
         </CardHeader>
         <CardContent className="space-y-4">
+
+          {/* ✅ حل مشكلة useSearchParams عبر Suspense */}
+          <Suspense fallback={null}>
+            <LoginSuccessAlert setSuccessMessage={setSuccessMessage} />
+          </Suspense>
+
           {error && (
             <Alert variant="destructive">
               <AlertCircle className="h-4 w-4" />
@@ -149,7 +140,7 @@ export default function LoginPage() {
               <AlertDescription>{successMessage}</AlertDescription>
             </Alert>
           )}
-          <form onSubmit={handleSubmit} className="space-y-4">
+          <form onSubmit={handleClientLogin} className="space-y-4">
             <div className="space-y-2">
               <Label htmlFor="email">البريد الإلكتروني</Label>
               <Input
@@ -183,11 +174,7 @@ export default function LoginPage() {
                 disabled={loading}
               />
             </div>
-            <Button
-              className="w-full"
-              type="submit"
-              disabled={loading}
-            >
+            <Button className="w-full" type="submit" disabled={loading}>
               {loading ? (
                 <span className="flex items-center justify-center">
                   <Loader2 className="mr-2 h-4 w-4 animate-spin" />
